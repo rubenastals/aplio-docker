@@ -9,7 +9,7 @@
 #   5. Pesos de modelos pre-descargados (Whisper medium + rmvpe + fcpe)
 #   6. Scripts de arranque y API server (cambia frecuentemente)
 # ─────────────────────────────────────────────────────────────────────────────
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -40,7 +40,7 @@ WORKDIR /workspace/Applio
 RUN /root/.local/bin/uv venv .venv --python python3.11 \
     && /root/.local/bin/uv pip install --python .venv/bin/python \
         -r requirements.txt \
-        --extra-index-url https://download.pytorch.org/whl/cu121 \
+        --extra-index-url https://download.pytorch.org/whl/cu128 \
         --index-strategy unsafe-best-match
 
 # ── 4. Deps del API server ────────────────────────────────────────────────────
