@@ -1,15 +1,19 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Applio RVC + Faster-Whisper + FastAPI — imagen optimizada para Vast.ai
 #
+# Base: pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime
+#   → PyTorch 2.7.1+cu128 ya incluido, no hay que descargarlo
+#
 # Capas ordenadas de menos a más probable de cambiar:
-#   1. Base CUDA + sistema
-#   2. Python / uv
-#   3. Clone Applio + deps PyTorch (cambia raramente)
-#   4. Deps API (fastapi, whisper, multipart)
-#   5. Pesos de modelos pre-descargados (Whisper medium + rmvpe + fcpe)
-#   6. Scripts de arranque y API server (cambia frecuentemente)
+#   1. Base PyTorch+CUDA (rarísimo)
+#   2. Sistema (git, ffmpeg...)
+#   3. Clone Applio + deps Python
+#   4. Deps API server (fastapi, whisper)
+#   5. Pesos Whisper medium pre-descargados
+#   6. Pesos RVC (rmvpe, fcpe)
+#   7. API server + scripts (cambia frecuentemente)
 # ─────────────────────────────────────────────────────────────────────────────
-FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu22.04
+FROM pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -19,63 +23,54 @@ ENV DEBIAN_FRONTEND=noninteractive \
     MODELS_DIR=/workspace/models \
     WHISPER_MODEL=medium \
     WHISPER_DEVICE=cuda \
-    WHISPER_COMPUTE=float16 \
-    PATH="/workspace/Applio/.venv/bin:${PATH}"
+    WHISPER_COMPUTE=float16
 
 # ── 1. Sistema ────────────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git ffmpeg libsndfile1 build-essential curl wget \
-    python3.11 python3.11-venv python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# ── 2. uv (gestor de paquetes Python rápido) ─────────────────────────────────
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# ── 3. Clone Applio + venv + deps PyTorch ────────────────────────────────────
-# Esta capa es la más grande (~10GB) pero cambia raramente
+# ── 2. Clone Applio ───────────────────────────────────────────────────────────
 WORKDIR /workspace
 RUN git clone --depth 1 https://github.com/IAHispano/Applio.git Applio
 
+# ── 3. Instalar deps Applio (excluyendo torch ya instalado en base) ───────────
+# Filtramos torch/torchaudio/torchvision para no reinstalar innecesariamente
 WORKDIR /workspace/Applio
-RUN /root/.local/bin/uv venv .venv --python python3.11 \
-    && /root/.local/bin/uv pip install --python .venv/bin/python \
-        -r requirements.txt \
-        --extra-index-url https://download.pytorch.org/whl/cu128 \
-        --index-strategy unsafe-best-match
+RUN pip install --no-cache-dir \
+        $(python -c "
+reqs = open('requirements.txt').read().splitlines()
+skip = ('torch==', 'torchaudio==', 'torchvision==')
+filtered = [r for r in reqs if r.strip() and not r.startswith('#') and not any(r.startswith(s) for s in skip)]
+print(' '.join(filtered))
+")
 
 # ── 4. Deps del API server ────────────────────────────────────────────────────
-RUN /root/.local/bin/uv pip install --python .venv/bin/python \
+RUN pip install --no-cache-dir \
     "faster-whisper>=1.0.0" \
     "fastapi>=0.111.0" \
     "uvicorn[standard]>=0.30.0" \
     "python-multipart>=0.0.9"
 
-# ── 5a. Pre-descargar pesos Whisper medium (~1.5GB) ───────────────────────────
-# Capa separada para que se cachee independientemente
-RUN .venv/bin/python -c "\
+# ── 5. Pre-descargar pesos Whisper medium (~1.5 GB) ───────────────────────────
+RUN python -c "\
 from faster_whisper import WhisperModel; \
 WhisperModel('medium', device='cpu', compute_type='int8'); \
-print('Whisper medium descargado')"
+print('Whisper medium OK')"
 
-# ── 5b. Pre-descargar prerequisitos RVC (rmvpe.pt ~200MB, fcpe.pt ~100MB) ─────
-RUN .venv/bin/python -c "\
+# ── 6. Pre-descargar prerrequisitos RVC (rmvpe.pt, fcpe.pt) ──────────────────
+RUN python -c "\
 import sys; sys.path.insert(0, '.'); \
 from rvc.lib.tools.prerequisites_download import prequisites_download_pipeline; \
 prequisites_download_pipeline(models=True, exe=False); \
-print('Prerrequisitos RVC descargados')"
+print('RVC prereqs OK')"
 
-# ── 6. Scripts de arranque y API server ───────────────────────────────────────
-# Esta capa cambia frecuentemente → va al final
+# ── 7. Scripts y API server ───────────────────────────────────────────────────
 WORKDIR /workspace
-
-COPY api_server.py      /workspace/api_server.py
-COPY restart_api.sh     /workspace/restart_api.sh
+COPY api_server.py   /workspace/api_server.py
+COPY restart_api.sh  /workspace/restart_api.sh
 RUN chmod +x /workspace/restart_api.sh
-
-# Directorio para modelos de voz (se monta en runtime o se copia)
 RUN mkdir -p /workspace/models /workspace/input /workspace/output
 
-EXPOSE 8000 22
-
-# El CMD ejecuta restart_api.sh que arranca uvicorn en foreground
+EXPOSE 8000
 CMD ["/bin/bash", "/workspace/restart_api.sh"]
