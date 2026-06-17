@@ -55,9 +55,12 @@ print('Whisper medium OK')"
 
 # ── 6. Pre-descargar prerrequisitos RVC (rmvpe.pt, fcpe.pt) ──────────────────
 RUN python -c "\
-import sys; sys.path.insert(0, '.'); \
+import sys, inspect; sys.path.insert(0, '.'); \
 from rvc.lib.tools.prerequisites_download import prequisites_download_pipeline; \
-prequisites_download_pipeline(models=True, exe=False); \
+sig = inspect.signature(prequisites_download_pipeline); \
+kwargs = {p: True for p in sig.parameters if p not in ('exe',)}; \
+kwargs['exe'] = False; \
+prequisites_download_pipeline(**kwargs); \
 print('RVC prereqs OK')"
 
 # ── 7. Scripts y API server ───────────────────────────────────────────────────
