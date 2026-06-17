@@ -35,15 +35,10 @@ WORKDIR /workspace
 RUN git clone --depth 1 https://github.com/IAHispano/Applio.git Applio
 
 # ── 3. Instalar deps Applio (excluyendo torch ya instalado en base) ───────────
-# Filtramos torch/torchaudio/torchvision para no reinstalar innecesariamente
+# Filtramos torch/torchaudio/torchvision que ya vienen en la imagen base
 WORKDIR /workspace/Applio
-RUN pip install --no-cache-dir \
-        $(python -c "
-reqs = open('requirements.txt').read().splitlines()
-skip = ('torch==', 'torchaudio==', 'torchvision==')
-filtered = [r for r in reqs if r.strip() and not r.startswith('#') and not any(r.startswith(s) for s in skip)]
-print(' '.join(filtered))
-")
+RUN grep -vE '^torch[a-z]*==' requirements.txt > /tmp/reqs_applio.txt && \
+    pip install --no-cache-dir -r /tmp/reqs_applio.txt
 
 # ── 4. Deps del API server ────────────────────────────────────────────────────
 RUN pip install --no-cache-dir \
